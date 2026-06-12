@@ -1,7 +1,6 @@
 #!/bin/bash
 
-set -euo pipefail
-
+SNAP="${SNAP:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
 BIN_DIR="${SNAP}/usr/bin"
 
 echo "Usage: level-zero-tests.test <test-name> [args...]"

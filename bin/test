@@ -1,16 +1,34 @@
 #!/bin/bash
 
-set -euo pipefail
+NO_CONFINEMENT=false
+REMAINING_ARGS=()
+# When invoked directly (bypassing the snap launcher), SNAP is not set.
+# Derive it from this script's own location: bin/test lives at $SNAP/bin/test.
+SNAP="${SNAP:-$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")}"
+
+for arg in "$@"; do
+    case "$arg" in
+        --no-confinement)
+            NO_CONFINEMENT=true
+            ;;
+        *)
+            REMAINING_ARGS+=("$arg")
+            ;;
+    esac
+done
 
 BIN_DIR="${SNAP}/usr/bin"
 
-if [ "$#" -lt 1 ]; then
-    echo "Usage: level-zero-tests.test <binary-name> [args...]" >&2
+if [ "${#REMAINING_ARGS[@]}" -lt 1 ]; then
+    echo "Usage: level-zero-tests.test [--no-confinement] <binary-name> [args...]" >&2
+    echo "" >&2
+    echo "  --no-confinement  Skip snap-bundled Level Zero drivers and use host" >&2
+    echo "                    drivers exclusively. Intended for use with the" >&2
+    echo "                    Checkbox framework when snap sandboxing is removed." >&2
     exit 2
 fi
 
-binname="$1"
-shift
+binname="${REMAINING_ARGS[0]}"
 
 case "${binname}" in
     test_*) ;;
@@ -27,6 +45,28 @@ if [ ! -x "${BIN_DIR}/${binname}" ]; then
     exit 2
 fi
 
+ARCH="${SNAP_ARCH:-$(dpkg --print-architecture)}"
+case "$ARCH" in
+    amd64) ARCH_TRIPLE=x86_64-linux-gnu ;;
+    arm64) ARCH_TRIPLE=aarch64-linux-gnu ;;
+    *)     ARCH_TRIPLE="${ARCH}-linux-gnu" ;;
+esac
+
+if [ "$NO_CONFINEMENT" = "true" ]; then
+    # Use host drivers exclusively.
+    # LD_PRELOAD overrides DT_RPATH embedded by snapcraft's patchelf pass.
+    # LD_LIBRARY_PATH covers the rest of the host driver stack.
+    HOST_ZE="/usr/lib/${ARCH_TRIPLE}/libze_loader.so.1"
+    if [ ! -f "$HOST_ZE" ]; then
+        echo "Error: --no-confinement requires the host Level Zero loader at $HOST_ZE"
+        echo "Install libze1 (or equivalent) on the host before using this mode."
+        exit 1
+    fi
+    export LD_PRELOAD="${HOST_ZE}"
+    export LD_LIBRARY_PATH="/usr/lib/${ARCH_TRIPLE}:/usr/lib"
+    echo "Host Level Zero loader: ${HOST_ZE}"
+fi
+
 # Run from BIN_DIR so helper executables and local test assets resolve.
 cd "${BIN_DIR}"
-exec "./${binname}" "$@"
+exec "./${binname}" "${REMAINING_ARGS[@]:1}"
