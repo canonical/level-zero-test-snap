@@ -53,18 +53,33 @@ case "$ARCH" in
 esac
 
 if [ "$NO_CONFINEMENT" = "true" ]; then
-    # Use host drivers exclusively.
-    # LD_PRELOAD overrides DT_RPATH embedded by snapcraft's patchelf pass.
-    # LD_LIBRARY_PATH covers the rest of the host driver stack.
-    HOST_ZE="/usr/lib/${ARCH_TRIPLE}/libze_loader.so.1"
+    # Use host drivers exclusively. DT_RPATH (baked in by patchelf) beats
+    # LD_LIBRARY_PATH, so preload every host ZE library the loader may
+    # dlopen to avoid mixing a host loader with snap-bundled ICD/layer libs.
+    HOST_LIB_DIR="/usr/lib/${ARCH_TRIPLE}"
+    HOST_ZE="${HOST_LIB_DIR}/libze_loader.so.1"
     if [ ! -f "$HOST_ZE" ]; then
         echo "Error: --no-confinement requires the host Level Zero loader at $HOST_ZE"
         echo "Install libze1 (or equivalent) on the host before using this mode."
         exit 1
     fi
-    export LD_PRELOAD="${HOST_ZE}"
-    export LD_LIBRARY_PATH="/usr/lib/${ARCH_TRIPLE}:/usr/lib"
-    echo "Host Level Zero loader: ${HOST_ZE}"
+
+    HOST_PRELOAD="${HOST_ZE}"
+    for lib in libze_tracing_layer.so.1 libze_validation_layer.so.1 \
+        libze_intel_gpu.so.1; do
+        candidate="${HOST_LIB_DIR}/${lib}"
+        if [ -f "$candidate" ]; then
+            HOST_PRELOAD="${HOST_PRELOAD}:${candidate}"
+        fi
+    done
+
+    export LD_PRELOAD="${HOST_PRELOAD}"
+    export LD_LIBRARY_PATH="${HOST_LIB_DIR}:/usr/lib"
+    # Without this, tracing/validation callbacks are never wired in and
+    # dynamic-tracing tests silently see zero invocations (or hang waiting
+    # on callbacks that never fire).
+    export ZE_ENABLE_TRACING_LAYER=1
+    echo "Host Level Zero libraries: ${HOST_PRELOAD}"
 fi
 
 # Run from BIN_DIR so helper executables and local test assets resolve.
