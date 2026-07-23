@@ -1,5 +1,5 @@
 name: level-zero-tests
-base: core24
+base: core26
 confinement: strict
 lint:
   ignore:
@@ -22,12 +22,22 @@ apps:
       - opengl
       - hardware-observe
       - system-observe
+      - shared-memory
+      - network-bind
   list-tests:
     command: list_tests
     plugs:
       - opengl
       - hardware-observe
       - system-observe
+      - shared-memory
+      - network-bind
+
+plugs:
+  # test_debug uses POSIX shm under /dev/shm for debugger/debuggee sync.
+  # private:true auto-connects to the implicit core slot for private /dev/shm.
+  shared-memory:
+    private: true
 
 parts:
   test-runner:
@@ -63,7 +73,14 @@ parts:
       - libglfw3-dev
       - libgles2-mesa-dev
       - glslang-tools
-      - libboost-all-dev
+      - libboost1.83-dev
+      - libboost-log1.83-dev
+      - libboost-program-options1.83-dev
+      - libboost-timer1.83-dev
+      - libboost-chrono1.83-dev
+      - libboost-serialization1.83-dev
+      - libboost-filesystem1.83-dev
+      - libboost-system1.83-dev
       - libdrm-dev
       - libudev-dev
       - libze-dev
@@ -77,18 +94,20 @@ parts:
       - libudev1
       - libpci3
       - pciutils
-      - libigc1
-      - libigdfcl1
+      - libigc2
+      - libigdfcl2
       - libnl-3-200
       - libnl-route-3-200
       - libze-intel-gpu1
       - libze1
-      - libssl3
-      - libpng16-16
+      - libssl3t64
+      - libpng16-16t64
       - libboost-log1.83.0
       - libboost-program-options1.83.0
       - libboost-timer1.83.0
       - libboost-filesystem1.83.0
+      - libboost-chrono1.83.0
+      - libboost-serialization1.83.0
       - libboost-system1.83.0
       - libstdc++6
     override-build: |
@@ -114,9 +133,15 @@ parts:
       # Make unit-test binaries easy to discover from $PATH.
       mkdir -p "${CRAFT_PART_INSTALL}/usr/bin"
       find build -type f -name "*test*" -perm -111 -exec cp -a {} "${CRAFT_PART_INSTALL}/usr/bin/" \;
-      # test_device helpers are looked up under "<cwd>/device".
-      mkdir -p "${CRAFT_PART_INSTALL}/usr/bin/device"
-      find build/conformance_tests/core/test_device -type f -name "test_*helper*" -perm -111 \
-        -exec cp -a {} "${CRAFT_PART_INSTALL}/usr/bin/device/" \;
+      # Several tests spawn helper binaries via a "<cwd>/<subdir>/helper"
+      # relative path. Physically copy (not symlink) each helper subdir into
+      # usr/bin/: AppArmor only grants library-read access to real paths
+      # under usr/bin/**, so a symlink pointing outside it loses access.
+      for d in device ipc tracing fabric memory process sysman_device debug metrics; do
+        if [ -d "${CRAFT_PART_INSTALL}/usr/${d}" ]; then
+          mkdir -p "${CRAFT_PART_INSTALL}/usr/bin/${d}"
+          cp -a "${CRAFT_PART_INSTALL}/usr/${d}/." "${CRAFT_PART_INSTALL}/usr/bin/${d}/"
+        fi
+      done
       # Some tests load SPIR-V modules from the current working directory.
       find . -type f -name "*.spv" -exec cp -a {} "${CRAFT_PART_INSTALL}/usr/bin/" \;

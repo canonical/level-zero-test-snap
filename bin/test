@@ -82,6 +82,18 @@ if [ "$NO_CONFINEMENT" = "true" ]; then
     echo "Host Level Zero libraries: ${HOST_PRELOAD}"
 fi
 
-# Run from BIN_DIR so helper executables and local test assets resolve.
-cd "${BIN_DIR}"
-exec "./${binname}" "${REMAINING_ARGS[@]:1}"
+# Some tests write CWD-relative files (sockets, module caches), which fails
+# with "Read-only file system" from BIN_DIR. Others spawn helpers or load
+# assets (e.g. .spv kernels) via CWD-relative paths. Run from a writable
+# dir, symlinked to BIN_DIR's contents, so both cases work.
+WORK_DIR="${SNAP_USER_COMMON:-${SNAP_USER_DATA:-${TMPDIR:-/tmp}/level-zero-tests-$(id -u)}}/testrun"
+mkdir -p "${WORK_DIR}"
+for entry in "${BIN_DIR}"/*; do
+    name="$(basename "${entry}")"
+    if [ ! -e "${WORK_DIR}/${name}" ]; then
+        ln -sfn "${entry}" "${WORK_DIR}/${name}"
+    fi
+done
+
+cd "${WORK_DIR}"
+exec "${BIN_DIR}/${binname}" "${REMAINING_ARGS[@]:1}"
