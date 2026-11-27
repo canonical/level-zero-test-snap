@@ -145,3 +145,6 @@ parts:
       done
       # Some tests load SPIR-V modules from the current working directory.
       find . -type f -name "*.spv" -exec cp -a {} "${CRAFT_PART_INSTALL}/usr/bin/" \;
+      # Image tests (test_copy, test_sampler, test_cmdlist) load their media,
+      # e.g. test_input.png, from the current working directory too.
+      find mediadata/merged -type f -exec cp -a {} "${CRAFT_PART_INSTALL}/usr/bin/" \;
